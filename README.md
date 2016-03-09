@@ -1,61 +1,93 @@
 # SQL Conventions
 
-(translation in progress)
+-- Proposition inspiré d'une boîte Vendéenne
 
-* use PostgreSQL (fallback on SQLite)
-* pas d'abbréviations des mots sauf pour des expressions bien connues et longue (e.g. "i18n")
-* pas de mots-clés réservé (par exemple `user` sur PGSQL)
-* table and view names should be singular and in camelCase, e.g. `team` not `teams` ([why](https://launchbylunch.com/posts/2014/Feb/16/sql-naming-conventions/#singular-relations))
-* nom des champs/tables en **camelCase**, e.g. `createdAt`
-* utiliser uniquement underscore pour les foreign-keys des tables, e.g. `user_id`
-* utiliser des UUID en type de  PK & FK
-* chaque table avoir avoir les champs `createdAt`, [`deletedAt`](http://stackoverflow.com/questions/8289100/create-unique-constraint-with-null-columns/8289253#8289253) (et `updatedAt` si la BDD est mutable)
-* utiliser une lib de data-mapping (anorm/slick) mais pas d'ORM
-* utiliser BNCF (au dessus de la 3NF) (cf normal form)
-* always set column to NOT NULL by default, use NULL only when necessary
-* never use ON DELETE CASCADE, set `deletedAt` to `NOW()`
-* leverage using, so instead of:
+* PostgreSQL is your friend, use it
 
-```
-select <fields> from
-  table_1
-  inner join table_2
-    using (table_1_id)
-```
+* Pas d'abbréviations des mots sauf pour des expressions bien connues et longue (e.g. "i18n")
+* Pas de mots-clés réservé (par exemple `user` sur PGSQL)
 
-use:
 
-```
-select <fields> from
-  table_1
-  inner join table_2
-    on table_1.table_1_id =
-       table_2.table_1_id
-```
+* Table names in PascalCase, singular (ex: `SupplierProduct`, `Product`, `Operator`, `Role`, etc.)
+  - Tables de liaison avec `_`, ex: `SupplierOrder_Product`, `Operator_Role`
+  - par opposition, une table sans liaison `OperatorRole`
 
-* utiliser les enum PG qui sont des types
-* use the right PostgreSQL types:
+* Column names in camelCase, singular (ex: `name`, `motivation`, `count`)
+  - foreign keys: `idProduct`, `idSupplierProduct`
+  - dates: `dateCreated`, `dateDeleted`, `dateUpdated` (oui, ça choque au début)
 
-```
-inet (IP address)
-timestamp with time zone
-point (2D point)
-tstzrange (time range)
-interval (duration)
-```
+* Limiter l'usage des alias au maximum (mais cela venait du fait que nous utilisions beaucoup les CTEs)
 
-* utiliser les tableaux si besoin (permet de gérer la notion "d'ordre" facilement)
-* constraint should be inside your database as much as possible:
+Exemple concret de requête :
 
 ```sql
-create table reservation(
-    reservation_id uuid primary key,
-    dates tstzrange not null,
-    exclude using gist (dates with &&)
+SELECT
+  *,
+  SUM("SupplierOrder_Product"."qty" * "SupplierOrder_Product"."price")
+    OVER (PARTITION BY "SupplierOrder"."id")                          AS "totalSupplierOrder"
+FROM "SupplierOrder"
+  INNER JOIN "SupplierOrder_Product" ON "SupplierOrder_Product"."idSupplierOrder" = "SupplierOrder"."id"
+```
+
+* utiliser des UUID en type de PK & FK (dépend de la volumétrie ?)
+* chaque table a les champs `dateCreated`, `dateUpdated` / `dateDeleted`
+
+* utiliser une lib de data-mapping (anorm/slick) mais pas d'ORM
+* utiliser BNCF (au dessus de la 3NF) (cf normal form)
+
+* Always set column to NOT NULL by default, never use NULL (enfin, c'était notre règle... dépend des use case)
+  - when using a foreign key in a table,
+
+* Never use ON DELETE CASCADE, set `deletedAt` to `NOW()`
+  - dépend du use case et de l'importance des données
+
+* Usage of USING (jamais utilisé car nos conventions ne le permettait pas, si la clé primaire colle à la règle de la clé étrangère, ce serait possible):
+
+```sql
+SELECT *
+FROM "Table1"
+  INNER JOIN "Table2" ON "Table2"."idTable1" = "Table1"."id"
+```
+
+* Utiliser les enum PG qui sont des types (nous étions old school, je n'ai pas l'argument qui peut-être était derrière)
+  - Quid du casing des types ? L'idéal serait aucun, sinon guillemets obligatoires
+
+```sql
+CREATE TYPE campaign_status AS ENUM ('sent', 'ordered');
+
+-- Usage
+CREATE TABLE "Campaign" (
+  -- ...
+  "status" campaign_status NOT NULL DEFAULT 'sent'
 );
 ```
 
-* standard names for indexes in PostgreSQL are: `{tablename}_{columnname(s)}_{suffix}` (e.g. `item_a_b_pkey`) where the suffix is one of the following:
+* Use the right PostgreSQL types:
+
+```sql
+inet --(IP address)
+timestamp with time zone
+point --(2D point)
+tstzrange --(time range)
+interval --(duration)
+daterange
+numeric
+```
+
+* Utiliser les tableaux si besoin (permet de gérer la notion "d'ordre" facilement)
+* Constraints should be inside your database as much as possible:
+* If a constraint is not possible, you can implement a trigger to check a constraint
+
+```sql
+CREATE "Reservation" (
+  id    UUID PRIMARY KEY,
+  dates TSTZRANGE NOT NULL,
+  EXCLUDE USING GiST (dates with &&)
+);
+```
+
+* Let PostgreSQL name your constraints when possible, fallback on the standard when PG can't do it for you
+* Standard names for indexes in PostgreSQL are: `{tablename}_{columnname(s)}_{suffix}` (e.g. `item_a_b_pkey`) where the suffix is one of the following:
   * Primary Key constraint: `pkey`
   * Foreign key: `fkey`
   * Unique constraint: `key`
